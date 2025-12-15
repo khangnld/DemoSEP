@@ -22,3 +22,25 @@ export class CreateUserDto {
     @Matches(/^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/)
     phone?: string
 }
+
+@InputType()
+export class UpdateUserDto {
+    @Field(() => String, { nullable: true })
+    @IsOptional()
+    @IsEmail()
+    email?: string
+
+    @Field(() => String, { nullable: true })
+    @IsOptional()
+    @MinLength(6)
+    password?: string
+
+    @Field(() => String, { nullable: true })
+    @IsOptional()
+    username?: string
+
+    @Field(() => String, { nullable: true })
+    @IsOptional()
+    @Matches(/^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/)
+    phone?: string
+}

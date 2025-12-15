@@ -16,4 +16,15 @@ export class UserService {
     async findOne(id: number) {
         return await this.prisma.user.findUnique({ where: { id } })
     }
+
+    async update(id: number, dataUser: any) {
+        return await this.prisma.user.update({
+            where: { id },
+            data: dataUser
+        })
+    }
+
+    async delete(id: number) {
+        return await this.prisma.user.delete({ where: { id } })
+    }
 }

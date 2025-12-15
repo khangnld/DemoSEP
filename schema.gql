@@ -17,11 +17,20 @@ type Query {
 
 type Mutation {
   createUser(userData: CreateUserDto!): User!
+  updateUser(id: Float!, userData: UpdateUserDto!): User!
+  deleteUser(id: Float!): User!
 }
 
 input CreateUserDto {
   email: String!
   password: String!
+  username: String
+  phone: String
+}
+
+input UpdateUserDto {
+  email: String
+  password: String
   username: String
   phone: String
 }
