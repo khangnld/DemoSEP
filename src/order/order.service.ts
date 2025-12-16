@@ -1,9 +1,14 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Inject } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { PrismaService } from 'src/prisma.service';
 
 @Injectable()
 export class OrderService {
-    constructor(private prisma: PrismaService) {}
+    constructor(
+        private prisma: PrismaService,
+        @Inject(CACHE_MANAGER) private cacheManager: Cache
+    ) {}
 
     async create(dataOrder: any) {
         // Validate user exists
@@ -29,8 +34,8 @@ export class OrderService {
         const totalPrice = product.price * dataOrder.quantity;
 
         // Create order and update product stock in transaction
-        return await this.prisma.$transaction(async (tx) => {
-            const order = await tx.order.create({
+        const order = await this.prisma.$transaction(async (tx) => {
+            const newOrder = await tx.order.create({
                 data: {
                     userId: dataOrder.userId,
                     productId: dataOrder.productId,
@@ -50,27 +55,60 @@ export class OrderService {
                 data: { stock: { decrement: dataOrder.quantity } },
             });
 
-            return order;
+            return newOrder;
         });
+
+        // Invalidate cache
+        await this.cacheManager.del('orders:all');
+        await this.cacheManager.del(`product:${dataOrder.productId}`);
+
+        return order;
     }
 
     async findAll() {
-        return await this.prisma.order.findMany({
+        // Check cache first
+        const cachedOrders = await this.cacheManager.get('orders:all');
+        if (cachedOrders) {
+            return cachedOrders;
+        }
+
+        // If not in cache, query database
+        const orders = await this.prisma.order.findMany({
             include: {
                 user: true,
                 product: true,
             },
         });
+
+        // Store in cache with TTL 1 hour
+        await this.cacheManager.set('orders:all', orders, 3600);
+
+        return orders;
     }
 
     async findOne(id: number) {
-        return await this.prisma.order.findUnique({
+        // Check cache first
+        const cacheKey = `order:${id}`;
+        const cachedOrder = await this.cacheManager.get(cacheKey);
+        if (cachedOrder) {
+            return cachedOrder;
+        }
+
+        // If not in cache, query database
+        const order = await this.prisma.order.findUnique({
             where: { id },
             include: {
                 user: true,
                 product: true,
             },
         });
+
+        if (order) {
+            // Store in cache with TTL 1 hour
+            await this.cacheManager.set(cacheKey, order, 3600);
+        }
+
+        return order;
     }
 
     async update(id: number, dataOrder: any) {
@@ -86,7 +124,7 @@ export class OrderService {
             }
 
             // Handle stock updates in transaction
-            return await this.prisma.$transaction(async (tx) => {
+            const order = await this.prisma.$transaction(async (tx) => {
                 // If changing product or quantity, adjust stock
                 if (dataOrder.productId !== existingOrder.productId || dataOrder.quantity) {
                     // Return stock from old product
@@ -130,10 +168,19 @@ export class OrderService {
                     },
                 });
             });
+
+            // Invalidate cache after transaction
+            await this.cacheManager.del(`order:${id}`);
+            await this.cacheManager.del('orders:all');
+            if (dataOrder.productId || existingOrder.productId) {
+                await this.cacheManager.del(`product:${dataOrder.productId || existingOrder.productId}`);
+            }
+
+            return order;
         }
 
         // Simple update without stock changes
-        return await this.prisma.order.update({
+        const order = await this.prisma.order.update({
             where: { id },
             data: dataOrder,
             include: {
@@ -141,6 +188,12 @@ export class OrderService {
                 product: true,
             },
         });
+
+        // Invalidate cache
+        await this.cacheManager.del(`order:${id}`);
+        await this.cacheManager.del('orders:all');
+
+        return order;
     }
 
     async delete(id: number) {
@@ -153,8 +206,9 @@ export class OrderService {
         }
 
         // Return stock when deleting order (if not delivered)
+        let deletedOrder;
         if (order.status !== 'DELIVERED') {
-            return await this.prisma.$transaction(async (tx) => {
+            deletedOrder = await this.prisma.$transaction(async (tx) => {
                 await tx.product.update({
                     where: { id: order.productId },
                     data: { stock: { increment: order.quantity } },
@@ -162,9 +216,17 @@ export class OrderService {
 
                 return await tx.order.delete({ where: { id } });
             });
+        } else {
+            deletedOrder = await this.prisma.order.delete({ where: { id } });
         }
 
-        return await this.prisma.order.delete({ where: { id } });
+        // Invalidate cache
+        await this.cacheManager.del(`order:${id}`);
+        await this.cacheManager.del('orders:all');
+        await this.cacheManager.del(`product:${order.productId}`);
+
+        return deletedOrder;
     }
 }
+
 

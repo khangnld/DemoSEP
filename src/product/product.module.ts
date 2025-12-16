@@ -8,4 +8,3 @@ import { ProductController } from './product.controller';
   controllers: [ProductController],
 })
 export class ProductModule {}
-
